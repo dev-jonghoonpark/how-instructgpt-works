@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How InstructGPT Works — 사람의 선호 순위를 보상으로 쓰는 RLHF</title>
+<meta name="description" content="InstructGPT(Training Language Models to Follow Instructions with Human Feedback, Ouyang et al., NeurIPS 2022)를 따라가는 인터랙티브 교육 자료. 순위에서 쌍 비교로, 쌍 비교에서 보상 모델로, 보상 모델에서 PPO 정책으로 — 브라우저에서 학습하는 보상 모델, PPO 클립, KL 벌점과 보상 모델 과최적화, PPO-ptx, ChatGPT로 이어지는 계보.">
+<style>
+:root{
+  color-scheme: light;
+  --surface-1:#fcfcfb;
+  --page:#f9f9f7;
+  --text-primary:#0b0b0b;
+  --text-secondary:#52514e;
+  --muted:#898781;
+  --grid:#e1e0d9;
+  --axis:#c3c2b7;
+  --border:rgba(11,11,11,0.10);
+  --s1:#2a78d6;
+  --s2:#eb6834;
+  --s3:#1baf7a;
+  --s4:#8b5cf6;
+  --s8:#e34948;
+  --warn:#fab219;
+  --good:#0ca30c;
+  --wash:rgba(42,120,214,0.08);
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --surface-1:#1a1a19;
+  --page:#0d0d0d;
+  --text-primary:#ffffff;
+  --text-secondary:#c3c2b7;
+  --muted:#898781;
+  --grid:#2c2c2a;
+  --axis:#383835;
+  --border:rgba(255,255,255,0.10);
+  --s1:#3987e5;
+  --s2:#d95926;
+  --s3:#199e70;
+  --s4:#a78bfa;
+  --s8:#e66767;
+  --warn:#fab219;
+  --good:#0ca30c;
+  --wash:rgba(57,135,229,0.14);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%; scroll-behavior:smooth}
+body{
+  margin:0; background:var(--page); color:var(--text-primary);
+  font-family:system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+  font-size:16px; line-height:1.75; letter-spacing:-0.01em;
+}
+.wrap{max-width:880px;margin:0 auto;padding:0 16px 120px}
+header.hero{padding:56px 0 28px;border-bottom:1px solid var(--border);margin-bottom:8px}
+h1{font-size:clamp(28px,5.2vw,42px);line-height:1.25;margin:0 0 12px;letter-spacing:-0.03em}
+.sub{color:var(--text-secondary);font-size:17px;margin:0}
+.kicker{font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 10px}
+h2{font-size:clamp(21px,3.4vw,27px);margin:56px 0 6px;letter-spacing:-0.02em;line-height:1.3}
+h3{font-size:18px;margin:34px 0 6px;letter-spacing:-0.015em}
+p{margin:12px 0}
+ul,ol{margin:12px 0;padding-left:22px}
+li{margin:6px 0}
+strong{font-weight:650}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.9em;background:var(--wash);padding:1px 5px;border-radius:4px}
+a{color:var(--s1)}
+.demo{background:var(--surface-1);border:1px solid var(--border);border-radius:14px;padding:18px;margin:24px 0}
+.demo h4{margin:0 0 2px;font-size:15px;color:var(--text-primary);font-weight:650}
+.demo .cap{color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.6}
+canvas{display:block;width:100%;border-radius:8px;background:var(--surface-1);touch-action:manipulation}
+.ctrls{display:flex;flex-wrap:wrap;gap:14px 22px;margin:14px 0 4px;align-items:flex-end}
+.ctrl{flex:1 1 210px;min-width:170px}
+.ctrl label{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;color:var(--text-secondary);margin-bottom:4px;gap:10px}
+.ctrl label b{font-variant-numeric:tabular-nums;color:var(--text-primary);font-weight:650;font-size:13px}
+input[type=range]{width:100%;accent-color:var(--s1);height:22px;margin:0}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+button{font:inherit;font-size:13px;font-weight:600;padding:7px 14px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--border);background:var(--surface-1);color:var(--text-primary);transition:background .12s}
+button:hover{background:var(--wash)}
+button[aria-pressed=true]{background:var(--wash);border-color:var(--s1)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--text-secondary);margin:10px 0 0}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:3px;border-radius:2px;display:inline-block}
+.readout{display:flex;flex-wrap:wrap;gap:8px 26px;margin-top:12px;font-size:13px;color:var(--text-secondary)}
+.readout b{display:block;font-size:19px;color:var(--text-primary);font-weight:650;line-height:1.3;letter-spacing:-0.02em;font-variant-numeric:tabular-nums}
+.eq{background:var(--surface-1);border:1px solid var(--border);border-left:3px solid var(--s1);
+  border-radius:0 10px 10px 0;padding:14px 18px;margin:18px 0;overflow-x:auto;text-align:center}
+.eq .note{display:block;font-size:12.5px;color:var(--muted);margin:6px 0 0;line-height:1.55;text-align:left}
+.tw{overflow-x:auto;margin:18px 0;border:1px solid var(--border);border-radius:12px;background:var(--surface-1)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:9px 13px;text-align:left;border-bottom:1px solid var(--border);vertical-align:middle}
+th{font-weight:650;font-size:12.5px;color:var(--text-secondary);background:var(--page)}
+tr:last-child td{border-bottom:none}
+td.num,th.num{font-variant-numeric:tabular-nums;text-align:right}
+td.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.note{border-left:3px solid var(--axis);padding:2px 0 2px 16px;margin:18px 0;color:var(--text-secondary);font-size:14.5px}
+.key{border:1px solid var(--border);border-left:3px solid var(--s2);background:var(--surface-1);
+  border-radius:0 10px 10px 0;padding:14px 18px;margin:20px 0}
+.key .lbl{font-size:11.5px;font-weight:700;letter-spacing:0.1em;color:var(--s2);display:block;margin-bottom:4px}
+.key p{margin:0}
+nav.toc{background:var(--surface-1);border:1px solid var(--border);border-radius:14px;padding:18px 22px;margin:26px 0}
+nav.toc ol{margin:6px 0 0;padding-left:20px;font-size:14.5px}
+nav.toc a{text-decoration:none;color:var(--text-primary)}
+nav.toc a:hover{color:var(--s1)}
+.q{border:1px solid var(--border);border-radius:10px;background:var(--surface-1);padding:16px 18px;margin:14px 0}
+.q h4{margin:0 0 8px;font-size:15px;color:var(--text-primary)}
+.q .opt{display:flex;gap:9px;align-items:flex-start;padding:7px 10px;border:1px solid var(--border);
+  border-radius:8px;margin:6px 0;cursor:pointer;font-size:14px;transition:border-color .12s}
+.q .opt:hover{border-color:var(--s1)}
+.q .opt input{margin-top:5px;accent-color:var(--s1)}
+.q .opt.correct{border-color:var(--good);background:rgba(12,163,12,0.08)}
+.q .opt.wrong{border-color:var(--s8);background:rgba(227,73,72,0.07)}
+.q .expl{display:none;font-size:13.5px;color:var(--text-secondary);border-left:3px solid var(--good);
+  padding:2px 0 2px 12px;margin-top:10px;line-height:1.65}
+.q .expl.bad{border-left-color:var(--s8)}
+.q .expl.show{display:block}
+.quiz-score{font-size:15px;font-weight:700;margin-top:14px}
+.tog{position:fixed;top:14px;right:14px;z-index:10;border-radius:999px;padding:7px 13px;
+  background:var(--surface-1);border:1px solid var(--border);font-size:12.5px}
+footer{margin-top:70px;padding-top:22px;border-top:1px solid var(--border);color:var(--muted);font-size:13px}
+footer a{color:var(--text-secondary)}
+.refs{font-size:13px;color:var(--text-secondary);line-height:1.7}
+.easy{background:var(--surface-1);border:1px solid var(--border);border-left:3px solid var(--s3);border-radius:0 14px 14px 0;padding:18px 20px;margin:24px 0}
+.easy .lbl{font-size:11.5px;font-weight:700;letter-spacing:0.1em;color:var(--s3);display:block;margin-bottom:2px}
+.easy h3{margin:0 0 8px}
+.easy ol{padding-left:20px}
+.easy .big{font-size:17px;text-align:center;margin:10px 0;font-weight:650}
+.sw{display:grid;grid-template-columns:150px 1fr 64px;gap:8px 10px;align-items:center;font-size:13px;margin-top:12px}
+.sw .bar{position:relative;height:18px;background:var(--page);border:1px solid var(--border);border-radius:4px}
+.sw .bar i{position:absolute;top:0;bottom:0;border-radius:3px}
+.sw .bar:after{content:'';position:absolute;left:50%;top:-3px;bottom:-3px;border-left:1px solid var(--axis)}
+.sw b{font-variant-numeric:tabular-nums;text-align:right}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media (max-width:640px){.split{grid-template-columns:1fr}}
+.split h5{margin:4px 0 0;font-size:13px;color:var(--text-secondary);font-weight:650}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13px;margin:16px 0;justify-content:center}
+.flow span{border:1px solid var(--border);background:var(--surface-1);border-radius:8px;padding:5px 10px;font-weight:600}
+.flow em{color:var(--muted);font-style:normal}
+sup.fn{font-size:0.72em;line-height:0;margin-left:1px}
+sup.fn a{text-decoration:none;font-weight:700;padding:0 2px}
+.footnotes{margin-top:64px;padding-top:18px;border-top:1px solid var(--border);font-size:14.5px;color:var(--text-secondary)}
+.footnotes h2{font-size:18px;margin:0 0 10px;color:var(--text-primary)}
+.footnotes ol{padding-left:22px}
+.footnotes li:target{background:var(--wash);border-radius:8px}
+.footnotes p{margin:10px 0}
+.footnotes .tw{font-size:13.5px}
+.footnotes .back{text-decoration:none;margin-left:4px}
+.pill{display:inline-block;font-size:11.5px;font-weight:700;padding:1px 8px;border-radius:999px;background:var(--wash);color:var(--s1);margin-left:6px;vertical-align:2px}
+
+@media (max-width:640px){.tog{position:absolute}}
+.ax-tp{color:var(--s1)}.ax-cp{color:var(--s4)}.ax-pp{color:var(--s2)}.ax-dp{color:var(--s3)}.ax-ep{color:var(--s8)}
+.tag{display:inline-block;font-size:11.5px;font-weight:700;padding:1px 8px;border-radius:999px;border:1px solid currentColor;margin-right:4px}
+svg.fig{display:block;width:100%;height:auto;margin:6px 0}
+svg.fig text{font-family:system-ui,-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;fill:var(--text-primary)}
+svg.fig .m{fill:var(--muted)}
+.gpu{cursor:pointer}
+.info{font-size:13.5px;color:var(--text-secondary);margin-top:10px;line-height:1.7;min-height:3.4em}
+.info b{color:var(--text-primary)}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:9px;overflow:hidden;flex-wrap:wrap}
+.seg button{border:none;border-radius:0;border-right:1px solid var(--border)}
+.seg button:last-child{border-right:none}
+.mini{font-size:12.5px;color:var(--muted);margin:8px 0 0}
+pre{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:14px 16px;overflow-x:auto;font-size:13px;line-height:1.6;margin:18px 0}
+#a4tb th,#a4tb td{white-space:nowrap}
+pre code{background:none;padding:0;font-size:inherit}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.chip{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;border:1px solid var(--border);border-radius:6px;padding:3px 8px;background:var(--page)}
+.chip.tok{border-color:var(--s1);background:var(--wash)}
+.chip.ok{border-color:var(--good);background:rgba(12,163,12,0.08)}
+.chip.bad{border-color:var(--s8);background:rgba(227,73,72,0.07)}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13.5px;margin:8px 0}
+.row .lab{min-width:118px;color:var(--text-secondary);font-weight:600}
+.trace{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.7;background:var(--page);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:8px 0;white-space:pre-wrap}
+.trace .w{color:var(--s8)}.trace .g{color:var(--good)}.trace .m{color:var(--muted)}
+.step-box{min-height:150px}
+.stepnav{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:13px;color:var(--muted)}
+textarea,input[type=text]{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--page);color:var(--text-primary)}
+.big-out{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:15px;font-weight:650;letter-spacing:0.02em;word-break:break-all;margin:6px 0}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:999px;border:1px solid var(--border);color:var(--text-secondary);margin-left:6px;vertical-align:1px}
+</style>
+</head>
+<body>
+<button class="tog" id="themeBtn" type="button">◐ 다크</button>
+<div class="wrap">
+<header class="hero">
+  <p class="kicker">정렬 · RLHF</p>
+  <h1>How InstructGPT Works — 사람의 선호 순위를 보상으로 쓰는 RLHF</h1>
+  <p class="sub">GPT-3는 다음 토큰을 예측하도록 학습했을 뿐, 사용자의 지시를 따르도록 학습한 적은 없습니다. 2022년 OpenAI의 InstructGPT는 사람이 매긴 <strong>"이 답이 저 답보다 낫다"는 순위</strong>를 모아 보상 모델을 만들고, 그 보상 모델을 채점자로 세워 GPT-3를 강화학습으로 미세조정했습니다. 그 결과 13억 파라미터 InstructGPT의 답이 100배 큰 1750억 GPT-3의 답보다 선호되었고, 같은 방법이 열 달 뒤 ChatGPT가 됩니다. 이 페이지는 논문 「Training Language Models to Follow Instructions with Human Feedback」(Ouyang 외, NeurIPS 2022)을 따라가며 순위가 쌍 비교로, 쌍 비교가 보상으로, 보상이 정책으로 바뀌는 과정을 브라우저에서 직접 계산해 봅니다.</p>
+</header>
+
+<div class="key">
+  <span class="lbl">이 자료의 축</span>
+  <p><strong>"좋은 답"을 수식으로 쓸 수는 없지만, 둘 중 어느 쪽이 나은지는 사람이 고를 수 있다.</strong> RLHF는 이 비교를 세 번 옮겨 적는 절차다. ① 사람의 <span class="ax-tp"><strong>순위</strong></span>를 쌍 비교로 풀고, ② 쌍 비교를 맞히도록 <span class="ax-pp"><strong>보상 모델</strong></span>을 학습해 답 하나에 점수 하나를 매기게 하고, ③ 그 점수를 올리도록 <span class="ax-dp"><strong>정책</strong></span>(언어 모델)을 PPO로 학습한다. 보상 모델은 사람의 근사일 뿐이므로, 정책이 그 허점을 파고들지 못하게 <strong>원래 모델에서 멀어지는 만큼 벌점(KL)</strong>을 주는 것이 나머지 절반이다.</p>
+</div>
+
+<nav class="toc">
+  <strong>학습 경로</strong>
+  <ol>
+    <li><a href="#s1">문제: 다음 토큰 예측은 지시 따르기가 아니다</a></li>
+    <li><a href="#s2">세 단계 한눈에 보기</a></li>
+    <li><a href="#s3">데이터와 라벨러</a></li>
+    <li><a href="#s4">1단계 · 시연으로 지도 미세조정 (SFT)</a></li>
+    <li><a href="#s5">2단계 · 순위에서 보상 모델로 (RM)</a></li>
+    <li><a href="#s6">3단계 · 보상 모델을 채점자로 PPO</a></li>
+    <li><a href="#s7">PPO-ptx: 사전학습 기울기를 섞는 이유</a></li>
+    <li><a href="#s8">결과</a></li>
+    <li><a href="#s9">누구의 선호에 맞춘 것인가, 그리고 한계</a></li>
+    <li><a href="#s10">ChatGPT로, 그리고 추론 모델로</a></li>
+    <li><a href="#s11">정리</a></li>
+    <li><a href="#s12">확인 퀴즈</a></li>
+  </ol>
+</nav>
+
+<p class="note">수치와 인용은 논문(arXiv:2203.02155) 본문과 부록에서 가져왔고, 절 번호를 함께 적었습니다. 데모는 원리를 보이기 위한 장난감 모형입니다. 보상 모델은 특징 다섯 개짜리 선형 모델, 정책은 응답 유형 여섯 개 위의 분포이며, 논문의 60억 파라미터 보상 모델이나 1750억 정책을 재현한 것이 아닙니다.</p>
+
+<!-- ───────── 1 ───────── -->
+<h2 id="s1">1. 문제: 다음 토큰 예측은 지시 따르기가 아니다</h2>
+<p>논문 서론은 문제를 한 문장으로 적습니다.</p>
+<div class="eq" style="text-align:left">
+"This is because the language modeling objective used for many recent large LMs — predicting the next token on a webpage from the internet — is different from the objective 'follow the user's instructions helpfully and safely'."
+<span class="note">최근의 큰 언어 모델이 쓰는 목적 함수(인터넷 문서의 다음 토큰 맞히기)는 "사용자의 지시를 도움이 되고 안전하게 따르라"는 목적과 다르다. 논문은 이를 목적 함수가 <strong>어긋나 있다(misaligned)</strong>고 부른다.</span>
+</div>
+<p>OpenAI가 논문과 함께 낸 블로그 글의 첫 예시가 이 차이를 잘 보여 줍니다.</p>
+<div class="tw"><table>
+<tr><th style="width:110px">프롬프트</th><td>Explain the moon landing to a 6 year old in a few sentences.</td></tr>
+<tr><th>GPT-3</th><td>Explain the theory of gravity to a 6 year old. Explain the theory of relativity to a 6 year old in a few sentences. Explain the big bang theory to a 6 year old. Explain evolution to a 6 year old.</td></tr>
+<tr><th>InstructGPT</th><td>People went to the moon, and they took pictures of what they saw, and sent them back to the earth so we could all see them.</td></tr>
+</table></div>
+<p>GPT-3의 출력은 틀린 것이 아닙니다. 인터넷 문서에서 저런 문장 뒤에는 비슷한 질문 목록이 이어지는 경우가 많고, GPT-3는 그럴듯한 <em>다음 문서 내용</em>을 이어 썼습니다. 당시에는 이 문제를 프롬프트로 풀었습니다. 질문과 답의 예시 몇 개를 앞에 붙여서(few-shot) "이 문서는 질문에 답하는 문서"라고 모델이 추측하게 만드는 방식입니다. InstructGPT는 프롬프트를 고치는 대신 <strong>모델의 목적 함수를 사람이 원하는 쪽으로 옮깁니다</strong>.</p>
+<p>그런데 "사람이 원하는 답"은 손실 함수로 쓸 수 없습니다. 정답 문장이 하나로 정해지지 않고, 도움이 되는지·사실인지·해롭지 않은지는 BLEU 같은 자동 지표로 잴 수 없습니다. 논문이 택한 길은 사람에게 직접 묻되, 사람이 가장 쉽게 할 수 있는 판단인 <strong>비교</strong>를 묻는 것입니다. 이 기법은 Christiano 외(2017)가 로봇·아타리 강화학습에, Stiennon 외(2020)가 요약에 먼저 썼고, InstructGPT는 이를 범용 지시 따르기로 넓혔습니다.</p>
+
+<!-- ───────── 2 ───────── -->
+<h2 id="s2">2. 세 단계 한눈에 보기</h2>
+<p>논문 그림 2의 세 단계입니다. 사전학습된 GPT-3에서 출발합니다.</p>
+<svg class="fig" viewBox="0 0 860 300" role="img" aria-label="RLHF 세 단계: 시연으로 SFT, 순위로 보상 모델, 보상 모델로 PPO">
+  <g font-size="13">
+    <rect x="6" y="14" width="268" height="272" rx="12" fill="none" stroke="var(--s1)" stroke-width="1.5"/>
+    <rect x="296" y="14" width="268" height="272" rx="12" fill="none" stroke="var(--s2)" stroke-width="1.5"/>
+    <rect x="586" y="14" width="268" height="272" rx="12" fill="none" stroke="var(--s3)" stroke-width="1.5"/>
+    <text x="22" y="40" font-weight="700" style="fill:var(--s1)">1단계 · SFT</text>
+    <text x="312" y="40" font-weight="700" style="fill:var(--s2)">2단계 · 보상 모델 (RM)</text>
+    <text x="602" y="40" font-weight="700" style="fill:var(--s3)">3단계 · PPO</text>
+    <text x="22" y="62" class="m" font-size="12">사람이 쓴 모범 답을 따라 쓰기</text>
+    <text x="312" y="62" class="m" font-size="12">사람의 순위를 맞히기</text>
+    <text x="602" y="62" class="m" font-size="12">보상 모델 점수를 올리기</text>
+    <g font-size="12.5">
+      <rect x="22" y="80" width="236" height="34" rx="8" fill="var(--wash)" stroke="var(--border)"/><text x="140" y="102" text-anchor="middle">프롬프트 1.3만 개</text>
+      <text x="140" y="132" text-anchor="middle" class="m">↓ 라벨러가 원하는 답을 직접 작성</text>
+      <rect x="22" y="144" width="236" height="34" rx="8" fill="var(--wash)" stroke="var(--border)"/><text x="140" y="166" text-anchor="middle">(프롬프트, 시연) 쌍</text>
+      <text x="140" y="196" text-anchor="middle" class="m">↓ 지도 학습 (다음 토큰 교차 엔트로피)</text>
+      <rect x="22" y="208" width="236" height="58" rx="8" fill="none" stroke="var(--s1)" stroke-width="1.5"/><text x="140" y="233" text-anchor="middle" font-weight="700">SFT 모델 π_SFT</text><text x="140" y="252" text-anchor="middle" class="m" font-size="11.5">2·3단계의 출발점</text>
+
+      <rect x="312" y="80" width="236" height="34" rx="8" fill="var(--wash)" stroke="var(--border)"/><text x="430" y="102" text-anchor="middle">프롬프트 3.3만 개</text>
+      <text x="430" y="132" text-anchor="middle" class="m">↓ 모델 답 K = 4~9개를 사람이 순위 매김</text>
+      <rect x="312" y="144" width="236" height="34" rx="8" fill="var(--wash)" stroke="var(--border)"/><text x="430" y="166" text-anchor="middle">D &gt; C &gt; A = B → 쌍 비교</text>
+      <text x="430" y="196" text-anchor="middle" class="m">↓ 이긴 답의 점수가 더 높도록 학습</text>
+      <rect x="312" y="208" width="236" height="58" rx="8" fill="none" stroke="var(--s2)" stroke-width="1.5"/><text x="430" y="233" text-anchor="middle" font-weight="700">보상 모델 r_θ(x, y)</text><text x="430" y="252" text-anchor="middle" class="m" font-size="11.5">답 하나 → 스칼라 점수 하나</text>
+
+      <rect x="602" y="80" width="236" height="34" rx="8" fill="var(--wash)" stroke="var(--border)"/><text x="720" y="102" text-anchor="middle">프롬프트 3.1만 개</text>
+      <text x="720" y="132" text-anchor="middle" class="m">↓ 정책이 답을 생성</text>
+      <rect x="602" y="144" width="236" height="34" rx="8" fill="var(--wash)" stroke="var(--border)"/><text x="720" y="166" text-anchor="middle">r_θ가 채점 (사람 없음)</text>
+      <text x="720" y="196" text-anchor="middle" class="m">↓ PPO로 정책 갱신 + KL 벌점</text>
+      <rect x="602" y="208" width="236" height="58" rx="8" fill="none" stroke="var(--s3)" stroke-width="1.5"/><text x="720" y="233" text-anchor="middle" font-weight="700">InstructGPT π_RL</text><text x="720" y="252" text-anchor="middle" class="m" font-size="11.5">π_SFT에서 초기화</text>
+    </g>
+    <path d="M274 237 H296" stroke="var(--axis)" stroke-width="1.5" fill="none"/><path d="M564 237 H586" stroke="var(--axis)" stroke-width="1.5" fill="none"/>
+  </g>
+</svg>
+<p>사람이 개입하는 곳은 1단계(답을 직접 쓰기)와 2단계(순위 매기기)뿐입니다. 3단계에서는 보상 모델이 사람을 대신하므로, 정책이 답을 수십만 개 생성해도 사람의 시간은 들지 않습니다. 논문은 2단계와 3단계를 되풀이할 수 있다고 적습니다. 현재 가장 좋은 정책으로 답을 뽑아 순위를 더 모으고, 새 보상 모델을 학습하고, 새 정책을 학습하는 식입니다(3.1절). 실제로 대부분의 비교 데이터는 SFT 정책에서 나왔고 일부가 PPO 정책에서 나왔습니다.</p>
+
+<!-- ───────── 3 ───────── -->
+<h2 id="s3">3. 데이터와 라벨러</h2>
+<h3>프롬프트는 어디서 왔나</h3>
+<p>프롬프트의 주된 출처는 OpenAI API Playground에서 초기 InstructGPT 모델을 쓰던 고객의 입력입니다. 접두가 길게 겹치는 프롬프트는 중복으로 걸러 내고, 사용자 ID 하나당 최대 200개로 제한하고, 학습·검증·테스트는 <strong>사용자 ID 단위로</strong> 나눠서 같은 사용자의 프롬프트가 양쪽에 들어가지 않게 했습니다(3.2절).</p>
+<p>그런데 맨 처음에는 InstructGPT가 없으니 고객 프롬프트도 없습니다. 그래서 첫 모델을 띄우기 위한 프롬프트는 라벨러가 직접 썼습니다. 세 종류입니다.</p>
+<ul>
+  <li><strong>Plain</strong>: 주제가 고루 퍼지도록 아무 과제나 지어내기</li>
+  <li><strong>Few-shot</strong>: 지시 하나와, 그 지시에 대한 질의·응답 쌍 여러 개를 함께 쓰기</li>
+  <li><strong>User-based</strong>: API 대기자 신청서에 적힌 사용 사례를 보고 그에 맞는 프롬프트 쓰기</li>
+</ul>
+<div class="tw"><table>
+<tr><th>데이터셋</th><th>용도</th><th class="num">학습 · 라벨러 작성</th><th class="num">학습 · 고객</th><th class="num">검증 · 라벨러 작성</th><th class="num">검증 · 고객</th></tr>
+<tr><td><span class="ax-tp"><strong>SFT</strong></span></td><td>프롬프트 + 사람이 쓴 시연</td><td class="num">11,295</td><td class="num">1,430</td><td class="num">1,550</td><td class="num">103</td></tr>
+<tr><td><span class="ax-pp"><strong>RM</strong></span></td><td>프롬프트 + 모델 답들의 순위</td><td class="num">6,623</td><td class="num">26,584</td><td class="num">3,488</td><td class="num">14,399</td></tr>
+<tr><td><span class="ax-dp"><strong>PPO</strong></span></td><td>프롬프트만 (사람 라벨 없음)</td><td class="num">—</td><td class="num">31,144</td><td class="num">—</td><td class="num">16,185</td></tr>
+</table></div>
+<p class="mini">부록 A.3 표 6. 본문은 학습 프롬프트를 SFT 약 1.3만, RM 3.3만, PPO 3.1만 개로 요약합니다.</p>
+<p>GPT-3 사전학습 데이터가 수천억 토큰인 것과 비교하면 아주 작습니다. RM 데이터의 사용 사례 분포(표 1)는 생성 45.6%, 열린 질의응답 12.4%, 브레인스토밍 11.2%, 대화 8.4%, 다시 쓰기 6.6%, 요약 4.2%, 분류 3.5%, 기타 3.5%, 닫힌 질의응답 2.6%, 추출 1.9%입니다.</p>
+
+<h3>라벨러</h3>
+<p>Upwork와 ScaleAI를 통해 약 40명의 계약자를 고용했습니다. 민감한 주제가 섞여 있기 때문에 선별 시험을 치렀습니다. 민감한 발언을 알아보는지, 순위가 연구자와 얼마나 일치하는지, 민감한 프롬프트에 좋은 시연을 쓰는지, 여러 집단에 대한 민감한 내용을 가려낼 수 있다고 스스로 평가하는지를 봤습니다(3.4절).</p>
+<p>라벨러는 답마다 순위 외에 메타데이터도 적습니다(표 3). 전반적 품질(1~7점)과 예·아니오 항목 11개입니다: 올바른 지시를 따르지 못함, 고객 지원용으로 부적절, 환각, 지시에 적힌 제약을 지킴, 성적 내용, 폭력적 내용, 폭력·학대·테러·자해를 부추기거나 말리지 않음, 보호 대상 집단 비하, 해로운 조언, 의견 표명, 도덕적 판단 표명. 8절의 평가 지표 대부분이 이 항목에서 나옵니다.</p>
+<div class="key"><span class="lbl">학습과 평가에서 기준이 달랐다</span><p>지시가 해로운 답을 요구하면 어느 쪽을 높게 매겨야 할까. 논문은 <strong>학습 데이터를 모을 때는 사용자에게 도움이 되는 것을 우선</strong>했고(그러지 않으면 어려운 설계 결정을 따로 내려야 했기 때문), <strong>최종 평가에서는 사실성과 무해함을 우선</strong>하도록 지시했다고 적는다(3.4절, 부록 B.2). 9절에서 보는 "해로운 지시도 따른다"는 한계는 여기서 나온다.</p></div>
+
+<!-- ───────── 4 ───────── -->
+<h2 id="s4">4. 1단계 · 시연으로 지도 미세조정 (SFT)</h2>
+<p>라벨러가 프롬프트마다 직접 쓴 답(시연)으로 GPT-3를 지도 학습합니다. 손실은 사전학습과 같은 다음 토큰 교차 엔트로피이고, 데이터만 "인터넷 문서"에서 "지시와 그에 대한 좋은 답"으로 바뀝니다.</p>
+<ul>
+  <li>16 에폭, 코사인 학습률 감쇠, 잔차 드롭아웃 0.2 (3.5절)</li>
+  <li>검증 손실 기준으로는 <strong>1 에폭 만에 과적합</strong>합니다. 그런데도 더 오래 학습할수록 보상 모델 점수와 사람의 선호 평가는 계속 좋아졌습니다. 그래서 최종 SFT 모델은 검증 손실이 아니라 <strong>검증 세트의 RM 점수</strong>로 골랐습니다.</li>
+</ul>
+<p>마지막 항목이 이 논문의 문제의식을 다시 보여 줍니다. 검증 손실은 "사람이 쓴 바로 그 문장을 얼마나 잘 맞히는가"를 재는데, 좋은 답은 하나가 아니므로 이 숫자가 나빠져도 답의 품질은 좋아질 수 있습니다.</p>
+<p>SFT만으로는 두 가지가 부족합니다. 첫째, 시연은 비쌉니다. 사람이 답 전체를 써야 합니다. 둘째, 시연은 "이렇게 써라"만 알려 줄 뿐 <strong>모델이 실제로 내놓는 답 중 어느 것이 더 나은지</strong>는 알려 주지 않습니다. 2단계는 모델이 쓴 답을 사람이 비교하게 해서 이 신호를 얻습니다. SFT 모델은 그 자체로 비교 기준선이면서, 보상 모델과 PPO 정책의 초기값이고, 3단계에서 KL 벌점의 기준점이 됩니다.</p>
+
+<!-- ───────── 5 ───────── -->
+<h2 id="s5">5. 2단계 · 순위에서 보상 모델로 (RM)</h2>
+<h3>순위 하나가 쌍 비교 여러 개가 된다</h3>
+<p>라벨러는 프롬프트 하나에 대해 모델이 쓴 답 K개(4~9개)를 받아 좋은 순서로 줄을 세웁니다. 순위 하나에는 "i가 j보다 낫다"는 쌍 비교가 K(K−1)/2개 들어 있습니다.</p>
+
+<div class="demo">
+  <h4>데모 1 · 라벨러가 되어 순위 매기기</h4>
+  <p class="cap">프롬프트: <strong>"달 착륙을 6살 아이에게 몇 문장으로 설명해 줘."</strong> 가장 좋다고 생각하는 답부터 차례로 누르세요. 정답은 없습니다. 다섯 개를 다 고르면 순위에 담긴 쌍 비교가 펼쳐집니다.</p>
+  <div id="d1list"></div>
+  <div class="btns"><button id="d1reset" type="button">다시 매기기</button></div>
+  <div id="d1out" class="info"></div>
+  <div class="tw" style="margin-bottom:0"><table>
+    <tr><th>답의 수 K</th><td class="num">4</td><td class="num">5</td><td class="num">6</td><td class="num">7</td><td class="num">8</td><td class="num">9</td></tr>
+    <tr><th>쌍 비교 수 K(K−1)/2</th><td class="num">6</td><td class="num">10</td><td class="num">15</td><td class="num">21</td><td class="num">28</td><td class="num">36</td></tr>
+  </table></div>
+</div>
+<p>라벨러의 클릭 몇 번이 학습 예시 수십 개가 되니 효율적입니다. 다만 함정이 있습니다. 한 순위에서 나온 쌍들은 같은 프롬프트, 같은 답들을 공유하므로 서로 강하게 얽혀 있습니다. 논문은 쌍을 전부 섞어 하나의 데이터셋으로 만들었더니 <strong>한 번만 훑어도 보상 모델이 과적합</strong>했다고 보고합니다. 답 하나가 최대 K−1개의 쌍에 나오므로 한 에폭 안에 같은 답을 K−1번 보게 되기 때문입니다. 해결책은 한 프롬프트에서 나온 쌍 전체를 <strong>배치 원소 하나</strong>로 묶는 것입니다. 답 K개를 각각 한 번씩만 순전파하면 되므로 계산도 K(K−1)/2번에서 K번으로 줄어듭니다(3.5절). 보상 모델 학습의 배치 크기는 프롬프트 64개, 쌍으로는 최대 64 × 36 = 2,304개이고, 동점인 쌍은 버립니다(부록 C.2).</p>
+
+<h3>손실: 이긴 답의 점수가 더 높을 확률</h3>
+<p>보상 모델 r<sub>θ</sub>(x, y)는 프롬프트 x와 답 y를 받아 실수 하나를 냅니다. 구조는 GPT-3에서 마지막 층(은닉 벡터를 어휘 확률로 바꾸는 unembedding)을 떼고 스칼라 하나를 내는 머리를 붙인 것입니다. 사람이 y<sub>w</sub>를 y<sub>l</sub>보다 높게 매긴 쌍마다, 두 점수의 <strong>차이</strong>를 시그모이드에 넣어 "모델이 사람과 같은 쪽을 고를 확률"로 읽고 그 로그 가능도를 올립니다.</p>
+<div class="eq">
+loss(θ) = − <span style="font-size:0.9em">1 / C(K,2)</span> · E<sub>(x, y<sub>w</sub>, y<sub>l</sub>) ~ D</sub> [ log σ( r<sub>θ</sub>(x, y<sub>w</sub>) − r<sub>θ</sub>(x, y<sub>l</sub>) ) ]
+<span class="note">식 (1). y<sub>w</sub>는 이긴 답, y<sub>l</sub>은 진 답, σ는 시그모이드, C(K,2) = K(K−1)/2. 체스의 Elo 점수나 Bradley–Terry 모형과 같은 꼴이다.</span>
+</div>
+
+<div class="demo">
+  <h4>데모 2 · 쌍 하나의 손실 계산기</h4>
+  <p class="cap">점수 차 Δ = r(이긴 답) − r(진 답)을 움직여 보세요. 곡선은 손실 −log σ(Δ)입니다.</p>
+  <canvas id="cv2" height="220"></canvas>
+  <div class="ctrls">
+    <div class="ctrl"><label>점수 차 Δ <b id="d2dV">0.0</b></label><input type="range" id="d2d" min="-50" max="50" value="0"></div>
+  </div>
+  <div class="readout">
+    <div>σ(Δ) = 사람과 같은 쪽을 고를 확률<b id="d2p">—</b></div>
+    <div>손실 −log σ(Δ)<b id="d2l">—</b></div>
+    <div>기울기 크기 1 − σ(Δ)<b id="d2g">—</b></div>
+  </div>
+</div>
+<ul>
+  <li>Δ = 0이면 손실은 log 2 ≈ 0.693입니다. 아무것도 모르는 보상 모델의 출발점입니다.</li>
+  <li>순서를 거꾸로 매긴 쌍(Δ &lt; 0)은 손실이 거의 직선으로 커지고 기울기가 1에 가깝습니다. 이미 맞힌 쌍(Δ ≫ 0)은 기울기가 0에 가까워 더 벌리려 하지 않습니다.</li>
+  <li>손실에는 점수의 <strong>차이</strong>만 들어갑니다. 모든 점수에 같은 상수를 더해도 손실은 그대로이므로 점수의 원점은 정해지지 않습니다. 그래서 논문은 강화학습 전에 편향을 더해 <strong>라벨러 시연의 평균 점수가 0</strong>이 되도록 맞춥니다.</li>
+</ul>
+
+<h3>브라우저에서 보상 모델 학습하기</h3>
+<div class="demo">
+  <h4>데모 3 · 쌍 비교만 보고 라벨러의 기준을 복원하는 보상 모델</h4>
+  <p class="cap">답 하나를 특징 다섯 개(0~1)로 나타냅니다. 가상의 라벨러는 숨은 기준 w*로 효용 w*·f를 계산하고, 거기에 잡음을 더한 값으로 K개를 줄 세웁니다. 보상 모델은 w*를 모르는 채 r<sub>θ</sub>(f) = θ·f를 θ = 0에서 시작해 식 (1)로 학습합니다. 한 스텝에 프롬프트 하나를 보고, 그 프롬프트의 쌍 전체가 배치 원소 하나입니다.</p>
+  <div class="split">
+    <div><h5>검증 쌍 정확도</h5><canvas id="cv3" height="230"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--s2)"></i>보상 모델</span>
+        <span><i style="background:var(--muted)"></i>상한 (기준 w*를 아는 채점자)</span>
+        <span><i style="background:var(--s1)"></i>라벨러끼리의 일치율</span>
+      </div>
+    </div>
+    <div><h5>학습된 θ (막대) 와 숨은 기준 w* (세로 눈금) — 방향만 비교</h5><div class="sw" id="d3bars"></div></div>
+  </div>
+  <div class="ctrls">
+    <div class="ctrl"><label>라벨러 잡음 τ (클수록 판단이 흔들림) <b id="d3tV">0.65</b></label><input type="range" id="d3t" min="5" max="300" value="65"></div>
+    <div class="ctrl"><label>프롬프트당 답의 수 K <b id="d3kV">4</b></label><input type="range" id="d3k" min="4" max="9" value="4"></div>
+  </div>
+  <div class="btns"><button id="d3run" type="button">▶ 학습</button><button id="d3reset" type="button">처음부터</button></div>
+  <div class="readout">
+    <div>스텝<b id="d3step">0</b></div>
+    <div>본 쌍 비교 수<b id="d3n">0</b></div>
+    <div>검증 정확도<b id="d3acc">—</b></div>
+    <div>라벨러 간 일치율<b id="d3agr">—</b></div>
+    <div>θ와 w*의 코사인 유사도<b id="d3cos">—</b></div>
+  </div>
+</div>
+<ul>
+  <li>보상 모델은 점수를 한 번도 본 적이 없습니다. "이쪽이 낫다"만 보고도 지시 수행과 사실성은 양수, 독성과 얼버무림은 음수라는 <strong>기준의 방향</strong>을 복원합니다.</li>
+  <li>정확도는 100%로 가지 않습니다. 라벨러 자신이 흔들리기 때문에, 기준을 정확히 아는 채점자도 상한까지만 맞힙니다. <strong>잡음 τ</strong>를 올리면 상한과 일치율이 함께 내려갑니다.</li>
+  <li>기본값 τ = 0.65는 라벨러 간 일치율이 논문 수치와 비슷하게 나오도록 고른 값입니다. 논문의 학습 라벨러들은 서로 <strong>72.6 ± 1.5%</strong> 일치했고(3.4절), 보상 모델이 라벨러의 선택을 맞힌 비율은 <strong>72.4 ± 0.4%</strong>였습니다(4.1절, 5-겹 교차 검증에서 학습에 포함된 라벨러 기준). 보상 모델의 정확도가 낮아 보여도, 사람끼리 일치하는 정도가 그만큼이라는 뜻입니다.</li>
+  <li><strong>K</strong>를 키우면 같은 스텝에 쌍이 더 많아(K=9면 6배) 더 빨리 수렴합니다.</li>
+</ul>
+<p class="note">논문은 보상 모델을 60억 파라미터 크기로만 학습했습니다. 1750억 보상 모델은 검증 손실은 더 낮았지만 학습이 불안정했고, PPO에서 보상 함수와 가치 함수로 쓰기에는 계산이 너무 무거웠습니다. 본문은 "SFT 모델에서 출발"이라고 적고, 부록 C.2는 최종 보상 모델을 공개 NLP 데이터셋들로 미세조정한 60억 GPT-3에서 초기화했으며 GPT-3나 SFT에서 초기화해도 결과가 비슷했다고 밝힙니다. 한 에폭, 학습률 9e-6입니다.</p>
+
+<!-- ───────── 6 ───────── -->
+<h2 id="s6">6. 3단계 · 보상 모델을 채점자로 PPO</h2>
+<h3>환경은 한 번 답하고 끝나는 밴딧</h3>
+<p>강화학습의 용어로 옮기면 이렇습니다(3.5절).</p>
+<div class="tw"><table>
+<tr><th>강화학습</th><th>InstructGPT</th></tr>
+<tr><td>정책 π</td><td>언어 모델. SFT 모델에서 초기화</td></tr>
+<tr><td>상태</td><td>무작위로 뽑은 고객 프롬프트 x</td></tr>
+<tr><td>행동</td><td>답 y 전체 (토큰을 하나씩 샘플링, 온도 1)</td></tr>
+<tr><td>보상</td><td>답이 끝난 뒤 보상 모델이 매긴 r<sub>θ</sub>(x, y) 하나</td></tr>
+<tr><td>에피소드</td><td>답 하나로 끝 — 논문 표현으로 "bandit environment"</td></tr>
+<tr><td>가치 함수</td><td>보상 모델에서 초기화한 별도의 60억 모델</td></tr>
+</table></div>
+<p>학습은 PPO(Schulman 외, 2017)로 합니다. 25만 6천 에피소드, 배치 512(미니배치 64개짜리 8개), 클립 비율 0.2입니다(부록 C.4).</p>
+
+<h3>PPO가 하는 일: 한 번에 너무 멀리 가지 않기</h3>
+<p>정책 경사는 "보상이 평균보다 높았던 답의 확률을 올린다"는 방법입니다. 문제는 답 몇 개의 표본으로 추정한 방향으로 크게 움직이면 정책이 망가진다는 것입니다. PPO는 새 정책과 표본을 뽑은 옛 정책의 확률 비 ρ = π<sub>new</sub>(y|x) / π<sub>old</sub>(y|x)가 1 ± ε 밖으로 나가면 더 얻을 것이 없게 목적 함수를 잘라 냅니다.</p>
+<div class="eq">
+L<sup>CLIP</sup> = E [ min( ρ · A , clip(ρ, 1 − ε, 1 + ε) · A ) ]
+<span class="note">A는 이점(advantage) = 받은 보상 − 가치 함수의 예상. A &gt; 0이면 예상보다 좋은 답.</span>
+</div>
+<div class="demo">
+  <h4>데모 4 · PPO의 잘린 목적 함수</h4>
+  <p class="cap">가로축은 확률 비 ρ, 세로축은 표본 하나가 목적 함수에 기여하는 값입니다. 평평한 구간에서는 기울기가 0이라 그 표본은 정책을 더 밀지 않습니다.</p>
+  <canvas id="cv4" height="230"></canvas>
+  <div class="ctrls">
+    <div class="ctrl"><label>확률 비 ρ <b id="d4rV">1.00</b></label><input type="range" id="d4r" min="0" max="200" value="100"></div>
+    <div class="ctrl"><label>클립 비율 ε <b id="d4eV">0.20</b></label><input type="range" id="d4e" min="5" max="50" value="20"></div>
+  </div>
+  <div class="btns"><div class="seg"><button id="d4pos" type="button" aria-pressed="true">A &gt; 0 (예상보다 좋은 답)</button><button id="d4neg" type="button" aria-pressed="false">A &lt; 0 (예상보다 나쁜 답)</button></div></div>
+  <div class="info" id="d4info"></div>
+</div>
+<p>좋은 답의 확률은 (1 + ε)배까지만, 나쁜 답의 확률은 (1 − ε)배까지만 움직이면 보상이 끝납니다. 반대로 잘못된 방향으로 간 경우(좋은 답의 확률을 낮췄거나 나쁜 답의 확률을 높인 경우)에는 자르지 않아서 되돌리는 기울기가 그대로 남습니다.</p>
+
+<h3>KL 벌점: 보상 모델을 믿는 정도</h3>
+<p>PPO의 클립은 <em>한 번의 갱신</em>이 멀리 가는 것을 막을 뿐, 갱신을 수천 번 하면 정책은 얼마든지 멀리 갑니다. 그런데 보상 모델은 SFT 모델이 쓴 답들 위에서만 사람의 순위를 배웠습니다. 정책이 그 분포를 벗어나 낯선 종류의 답을 쓰기 시작하면 보상 모델의 점수는 믿을 수 없고, 정책은 <strong>사람이 아니라 보상 모델이 좋아하는 답</strong>을 찾아냅니다. 논문은 이를 막기 위해 보상에서 SFT 모델과의 차이를 토큰마다 뺍니다.</p>
+<div class="eq">
+R(x, y) = r<sub>θ</sub>(x, y) − β · log( π<sub>RL</sub>(y | x) / π<sub>SFT</sub>(y | x) )
+<span class="note">"we add a per-token KL penalty from the SFT model at each token to mitigate over-optimization of the reward model." (3.5절) 둘째 항의 기댓값이 KL(π<sub>RL</sub> ‖ π<sub>SFT</sub>)이다. 논문의 β = 0.02.</span>
+</div>
+<p>이 목적 함수에는 닫힌 꼴의 최적해가 있습니다. E[r] − β · KL(π ‖ π<sub>SFT</sub>)를 최대로 하는 분포는</p>
+<div class="eq">
+π*(y | x) ∝ π<sub>SFT</sub>(y | x) · exp( r<sub>θ</sub>(x, y) / β )
+<span class="note">SFT 정책을 보상으로 <strong>다시 가중</strong>한 분포. β → ∞이면 SFT 그대로, β → 0이면 보상이 가장 높은 답 하나로 몰린다. SFT가 확률 0을 준 답은 끝내 나오지 않는다.</span>
+</div>
+
+<div class="demo">
+  <h4>데모 5 · β를 움직여 보는 정책: 보상 모델의 허점과 KL 벌점</h4>
+  <p class="cap">한 프롬프트에 대한 답을 여섯 유형으로 단순화했습니다. 보상 모델은 SFT가 자주 쓰는 유형에서는 사람과 거의 같은 점수를 주지만, SFT가 거의 쓰지 않아 비교 데이터가 없던 여섯째 유형을 <strong>과대평가</strong>합니다. 유형 아래 막대 π<sub>RL</sub>은 위 식의 최적 정책이고, 그래프는 β마다 그 정책이 얻는 평균 점수입니다. 논문의 β(토큰 단위)와 이 장난감의 β는 눈금이 달라 값을 직접 비교할 수 없습니다.</p>
+  <div class="tw"><table id="d5tb"></table></div>
+  <canvas id="cv5" height="250"></canvas>
+  <div class="legend">
+    <span><i style="background:var(--s2)"></i>보상 모델이 매긴 평균 점수</span>
+    <span><i style="background:var(--s3)"></i>사람 기준 평균 점수</span>
+    <span><i style="background:var(--axis)"></i>SFT 정책의 사람 기준 점수</span>
+  </div>
+  <div class="ctrls">
+    <div class="ctrl"><label>KL 계수 β <b id="d5bV">1.00</b></label><input type="range" id="d5b" min="-130" max="100" value="0"></div>
+  </div>
+  <div class="btns"><div class="seg"><button id="d5err" type="button" aria-pressed="true">보상 모델에 허점 있음</button><button id="d5ok" type="button" aria-pressed="false">보상 모델이 사람과 같음</button></div></div>
+  <div class="readout">
+    <div>보상 모델 점수<b id="d5rm">—</b></div>
+    <div>사람 기준 점수<b id="d5hu">—</b></div>
+    <div>KL(π<sub>RL</sub> ‖ π<sub>SFT</sub>)<b id="d5kl">—</b></div>
+    <div>과대평가된 유형의 확률<b id="d5ex">—</b></div>
+  </div>
+</div>
+<ul>
+  <li><strong>β = 10</strong>(오른쪽 끝): 정책이 SFT에서 거의 움직이지 않습니다. 안전하지만 얻는 것도 없습니다.</li>
+  <li><strong>β ≈ 0.6~1</strong>: "짧고 정확한 답"의 확률이 크게 늘고 "지시 무시"와 "환각"이 줄어, 사람 기준 점수가 SFT보다 뚜렷이 오릅니다. RLHF가 의도한 구간입니다.</li>
+  <li><strong>β를 더 내리면</strong> 보상 모델 점수(주황)는 계속 오르는데 사람 기준 점수(초록)는 꺾여 내려갑니다. 정책이 SFT에서 1%밖에 나오지 않던 여섯째 유형으로 몰려갑니다. 두 곡선이 갈라지는 지점이 <strong>보상 모델 과최적화</strong>입니다. 학습 중에 보이는 숫자는 주황뿐이라는 점이 이 문제를 어렵게 합니다.</li>
+  <li><strong>"보상 모델이 사람과 같음"</strong>으로 바꾸면 두 곡선이 겹치고 β가 작을수록 좋아집니다. KL 벌점은 보상 모델이 완벽하지 않기 때문에 필요한 장치입니다.</li>
+</ul>
+<p class="note">이 데모는 정책을 직접 최적해로 놓았습니다. 실제 학습은 이 최적해를 향해 PPO로 조금씩 움직이는 과정이고, 답이 토큰 수십~수백 개의 열이라 유형을 셀 수 없으므로 표본으로 기울기를 추정합니다.</p>
+
+<!-- ───────── 7 ───────── -->
+<h2 id="s7">7. PPO-ptx: 사전학습 기울기를 섞는 이유</h2>
+<p>PPO로 학습한 모델은 사람의 선호 평가에서는 좋아졌지만, SQuAD·DROP·HellaSwag·WMT 2015 불→영 번역 같은 공개 NLP 벤치마크에서는 GPT-3보다 성능이 떨어졌습니다. 논문은 이를 "정렬세(alignment tax)"의 한 예라고 부릅니다. 고객 프롬프트 3만 개 위에서만 보상을 올리다 보니, 사전학습에서 배운 능력의 일부를 잊은 것입니다.</p>
+<p>해결책은 PPO 갱신마다 <strong>사전학습 데이터에서 다음 토큰을 맞히는 기울기</strong>를 함께 섞는 것입니다. 이렇게 학습한 모델이 PPO-ptx이고, 논문에서 별도 언급 없이 "InstructGPT"라고 하면 이 모델을 가리킵니다.</p>
+<div class="eq">
+objective(φ) = E<sub>(x,y) ~ D<sub>π_RL</sub></sub> [ <span class="ax-pp">r<sub>θ</sub>(x, y)</span> − <span class="ax-tp">β · log( π<sub>RL</sub>(y|x) / π<sub>SFT</sub>(y|x) )</span> ] + <span class="ax-dp">γ · E<sub>x ~ D<sub>pretrain</sub></sub> [ log π<sub>RL</sub>(x) ]</span>
+<span class="note">식 (2). β = 0.02, γ = 27.8. γ = 0이면 그냥 "PPO" 모델. 사전학습 예시는 RL 에피소드의 8배를 섞는다(부록 C.4).</span>
+</div>
+<div class="tw"><table>
+<tr><th>항</th><th>무엇을 당기나</th><th>없으면</th></tr>
+<tr><td><span class="ax-pp"><strong>r<sub>θ</sub></strong></span></td><td>사람이 선호하는(정확히는 보상 모델이 그렇다고 예측하는) 답 쪽으로</td><td>SFT 모델 그대로</td></tr>
+<tr><td><span class="ax-tp"><strong>β · KL</strong></span></td><td>SFT 모델이 쓰던 답의 분포 쪽으로</td><td>보상 모델의 허점으로 몰려감 (데모 5)</td></tr>
+<tr><td><span class="ax-dp"><strong>γ · 사전학습</strong></span></td><td>원래 GPT-3가 인터넷 문서를 잘 예측하던 상태 쪽으로</td><td>공개 NLP 벤치마크 성능 하락</td></tr>
+</table></div>
+<p>둘째와 셋째 항은 모두 "원래 모델에서 너무 멀어지지 마라"는 닻이지만 붙잡는 곳이 다릅니다. KL 항은 <em>정책이 생성한 답</em> 위에서 SFT 모델과 비교하고, 사전학습 항은 <em>사전학습 문서</em> 위에서 가능도를 지킵니다. 논문은 KL 계수 β를 키우는 것만으로는 벤치마크 성능 하락이 다 회복되지 않았고, 사전학습 기울기를 섞는 쪽이 더 나았다고 보고합니다(3.5절, 부록 E).</p>
+
+<!-- ───────── 8 ───────── -->
+<h2 id="s8">8. 결과</h2>
+<p>모델은 GPT-3의 세 크기(13억, 60억, 1750억)로 학습했고, 비교 대상은 GPT-3, few-shot 접두를 붙인 GPT-3(prompted), SFT, PPO, PPO-ptx입니다. 주 지표는 학습에 쓰지 않은 고객의 프롬프트에 대해 라벨러가 매긴 선호입니다(4.1절).</p>
+<div class="tw"><table>
+<tr><th>측정</th><th>결과</th><th>출처</th></tr>
+<tr><td>1750억 InstructGPT vs 1750억 GPT-3</td><td>InstructGPT의 답이 <strong>85 ± 3%</strong> 선호됨</td><td>4.1절</td></tr>
+<tr><td>1750억 InstructGPT vs few-shot GPT-3</td><td><strong>71 ± 4%</strong> 선호됨</td><td>4.1절</td></tr>
+<tr><td>13억 InstructGPT vs 1750억 GPT-3</td><td>파라미터가 100배 적은 InstructGPT가 선호됨</td><td>초록</td></tr>
+<tr><td>학습에 참여하지 않은 라벨러의 평가</td><td>학습 라벨러와 거의 같은 비율로 InstructGPT를 선호</td><td>4.1절</td></tr>
+<tr><td>닫힌 영역 과제의 환각 비율</td><td>GPT-3 41% → InstructGPT <strong>21%</strong></td><td>1절</td></tr>
+<tr><td>TruthfulQA</td><td>사실이면서 정보가 있는 답을 약 2배 자주 생성</td><td>1절</td></tr>
+<tr><td>독성 (RealToxicityPrompts)</td><td>"공손하게"라고 지시했을 때 독성 출력 약 25% 감소</td><td>1절</td></tr>
+<tr><td>편향 (Winogender, CrowS-Pairs)</td><td>GPT-3 대비 유의미한 개선 없음</td><td>4.2절</td></tr>
+<tr><td>공개 지시 데이터셋(FLAN, T0)으로 미세조정한 GPT-3</td><td>SFT 기준선 대비 승률: InstructGPT 73.4 ± 2%, T0 26.8 ± 2%, FLAN 29.8 ± 2%</td><td>1절</td></tr>
+</table></div>
+<ul>
+  <li><strong>프롬프트보다 미세조정</strong>: few-shot 접두를 붙인 GPT-3도 맨 GPT-3보다 낫지만, InstructGPT는 그보다 71% 선호됩니다. 그리고 사용자가 접두를 준비할 필요가 없습니다.</li>
+  <li><strong>크기보다 정렬</strong>: 13억 InstructGPT가 1750억 GPT-3보다 선호된다는 결과는, 이 평가에서 병목이 지식이나 능력이 아니라 "무엇을 하라는 것인지 알아듣는가"였다는 뜻입니다.</li>
+  <li><strong>과적합이 아니다</strong>: 학습 데이터를 만들지 않은 라벨러도 같은 선호를 보였고, 라벨러 집단을 다섯으로 나눠 교차 검증한 보상 모델은 처음 보는 라벨러의 선택을 69.6 ± 0.9% 맞혔습니다(본 라벨러는 72.4 ± 0.4%).</li>
+  <li><strong>공개 데이터셋으로는 부족하다</strong>: FLAN과 T0는 분류·질의응답처럼 자동 평가가 쉬운 과제 위주인데, 실제 API 사용의 절반 가까이는 열린 생성입니다(3절의 분포). 논문은 이 불일치를 이유로 듭니다.</li>
+  <li><strong>TruthfulQA는 조심해서 읽기</strong>: 본문 4.2절은 개선이 "작지만 유의미"하다고 적고, 13억 PPO-ptx는 같은 크기의 GPT-3보다 조금 나빴다고 밝힙니다.</li>
+</ul>
+
+<div class="demo">
+  <h4>정렬에 드는 계산은 사전학습의 몇 %인가</h4>
+  <p class="cap">1750억 모델 기준, 단위는 petaflop/s-day, 가로축은 로그 스케일입니다(5.1절).</p>
+  <canvas id="cv6" height="150"></canvas>
+</div>
+<p>PPO-ptx 학습은 GPT-3 사전학습의 약 1.6%, SFT는 약 0.13%입니다. 논문은 이를 근거로, 지금 단계에서는 모델을 더 키우는 것보다 기존 모델을 정렬하는 데 투자하는 쪽이 비용 대비 효과가 크다고 주장합니다.</p>
+
+<!-- ───────── 9 ───────── -->
+<h2 id="s9">9. 누구의 선호에 맞춘 것인가, 그리고 한계</h2>
+<h3>"사람의 선호"에서 사람은 누구인가</h3>
+<p>논문 5.2절의 제목은 "Who are we aligning to?"입니다. InstructGPT가 맞춰진 대상은 추상적인 인류가 아니라 다음이 겹친 것입니다.</p>
+<ul>
+  <li><strong>라벨러 약 40명</strong>: 주로 미국이나 동남아시아에 사는 영어 사용자입니다. 자발적 설문에 답한 19명 가운데 약 75%가 35세 미만이었습니다(부록 B.3). 논문은 법적인 이유로 인구통계 기준으로 고용할 수 없었다고 적습니다.</li>
+  <li><strong>연구자</strong>: 라벨링 지침을 쓰고, 애매한 사례에 답한 사람들입니다. 라벨러의 판단은 이 지침을 거쳐 나옵니다.</li>
+  <li><strong>API 고객</strong>: 학습 프롬프트를 보낸 사람들입니다. 어떤 과제가 중요한지가 여기서 정해집니다. 고객은 대기자 명단에서 뽑혔으므로 이 선택에도 OpenAI의 기준이 들어 있습니다.</li>
+</ul>
+<p>라벨러끼리도 생각이 다릅니다. 학습 라벨러의 일치율 72.6%는 쌍 넷 중 하나에서 두 사람이 반대로 골랐다는 뜻입니다. 데모 3에서 본 것처럼 보상 모델은 이 불일치를 평균 내어 하나의 점수로 만듭니다. 논문은 의견이 갈리는 사안에서는 평균이 바람직하지 않을 수 있고, 특정 집단의 선호를 조건으로 주는 모델 같은 대안이 필요할 수 있다고 적습니다.</p>
+
+<h3>논문이 보고한 실패</h3>
+<div class="tw"><table>
+<tr><th>유형</th><th>예시 프롬프트 (그림 9)</th><th>InstructGPT의 행동</th></tr>
+<tr><td>거짓 전제를 받아들임</td><td>"Why is it important to eat socks after meditating?"</td><td>전제가 틀렸다고 하지 않고 양말을 먹는 이유를 지어냄</td></tr>
+<tr><td>과한 얼버무림</td><td>"What happens if you fire a cannonball directly at a pumpkin at high speeds?"</td><td>호박이 터진다는 단순한 답 대신 "여러 요인에 따라 다르다"는 긴 답</td></tr>
+<tr><td>제약이 여럿일 때</td><td>"1930년대 프랑스 배경 영화 10편" 같은 다중 제약</td><td>제약 일부를 놓침</td></tr>
+<tr><td>해로운 지시</td><td>—</td><td>대부분 그대로 따름 (5.3절)</td></tr>
+</table></div>
+<ul>
+  <li>얼버무림은 보상의 부작용으로 읽을 수 있습니다. 논문은 라벨러에게 <strong>인식적 겸손</strong>을 높게 평가하라고 지시했고, 그래서 보상 모델이 얼버무리는 말투 자체에 점수를 주게 되었을 수 있다고 추측합니다(4.3절). 데모 5의 "보상 모델이 좋아하는 답"이 실제로 나타난 사례입니다.</li>
+  <li>해로운 지시를 따르는 것은 3절에서 본 대로 학습 데이터를 모을 때 "사용자에게 도움이 되는 것"을 우선했기 때문입니다. 모델은 배운 대로 했습니다. 무엇을 거절할지는 RLHF라는 기법이 정해 주지 않고, <strong>라벨링 지침</strong>이 정합니다.</li>
+  <li>RLHF는 모델이 무엇을 <em>아는가</em>를 바꾸는 기법이 아닙니다. 사람이 보기에 좋은 답을 고르게 할 뿐이므로, 라벨러가 알아채지 못하는 오류(그럴듯한 환각)에는 보상이 내려가지 않습니다.</li>
+</ul>
+
+<!-- ───────── 10 ───────── -->
+<h2 id="s10">10. ChatGPT로, 그리고 추론 모델로</h2>
+<h3>ChatGPT: 같은 세 단계를 대화에</h3>
+<p>InstructGPT 모델은 2022년 1월 OpenAI API의 기본 모델로 배포되었습니다. 그리고 2022년 11월 30일 공개된 ChatGPT의 소개 글은 학습 방법을 이렇게 적습니다.</p>
+<div class="eq" style="text-align:left">
+"We trained this model using Reinforcement Learning from Human Feedback (RLHF), using the same methods as InstructGPT, but with slight differences in the data collection setup."
+</div>
+<div class="tw"><table>
+<tr><th>단계</th><th>InstructGPT</th><th>ChatGPT (소개 글 기준)</th></tr>
+<tr><td>1. SFT</td><td>프롬프트 하나에 라벨러가 답 하나를 씀</td><td>AI 트레이너가 <strong>사용자와 AI 양쪽을 연기</strong>하며 대화를 씀. 모델이 쓴 제안을 참고해 답을 다듬음</td></tr>
+<tr><td>2. 보상 모델</td><td>한 프롬프트의 답 K개를 순위 매김</td><td>트레이너와 챗봇의 대화에서 모델 메시지 하나를 골라, 대안 답 여러 개를 뽑아 순위 매김</td></tr>
+<tr><td>3. 강화학습</td><td>PPO</td><td>PPO. 이 과정을 여러 번 반복</td></tr>
+</table></div>
+<p>방법은 같고, 데이터의 단위가 "지시 하나와 답 하나"에서 "여러 차례 주고받는 대화"로 바뀌었습니다. ChatGPT가 InstructGPT의 한계(해로운 지시를 따름)와 다르게 일부 요청을 거절하는 것도 기법이 달라서가 아니라 라벨링 기준이 달라서입니다.</p>
+
+<h3>추론 모델과 이어지는 지점</h3>
+<p>InstructGPT의 3단계와 <a href="https://dev-jonghoonpark.github.io/how-o1-works/">o1</a>·<a href="https://dev-jonghoonpark.github.io/how-deepseek-r1-works/">DeepSeek-R1</a>의 학습은 둘 다 "언어 모델을 강화학습으로 미세조정한다"는 같은 틀입니다. 다른 것은 <strong>보상이 어디서 오는가</strong>입니다.</p>
+<div class="tw"><table>
+<tr><th></th><th>InstructGPT (2022)</th><th>DeepSeek-R1 (2025)</th></tr>
+<tr><td>보상</td><td>사람의 순위로 학습한 신경망 보상 모델</td><td>정답 여부와 형식만 보는 규칙</td></tr>
+<tr><td>재는 것</td><td>답이 사람 마음에 드는가 (도움·사실·무해)</td><td>최종 답이 맞는가</td></tr>
+<tr><td>쓸 수 있는 과제</td><td>정답이 하나로 정해지지 않는 모든 과제</td><td>자동 채점이 되는 수학·코딩 등</td></tr>
+<tr><td>약점</td><td>보상 모델의 허점을 정책이 파고듦 → KL 벌점이 필요</td><td>채점할 수 없는 과제에는 쓸 수 없음</td></tr>
+</table></div>
+<p>R1 논문은 신경망 보상 모델이 대규모 강화학습에서 보상 해킹에 취약하다는 이유로 규칙 기반 보상을 택했습니다. 데모 5에서 본 주황색과 초록색 곡선의 갈라짐이 바로 그 문제입니다. 보상을 사람에게서 배우면 넓은 과제에 쓸 수 있지만 멀리 최적화할 수 없고, 보상을 규칙으로 쓰면 멀리 최적화할 수 있지만 쓸 수 있는 과제가 좁습니다.</p>
+
+<!-- ───────── 11 ───────── -->
+<h2 id="s11">11. 정리</h2>
+<ul>
+  <li>GPT-3의 목적 함수(다음 토큰 예측)는 "지시를 도움이 되고 안전하게 따르기"와 다르다. InstructGPT는 프롬프트가 아니라 <strong>목적 함수 쪽을 옮겼다</strong>.</li>
+  <li>1단계 SFT: 사람이 쓴 시연 1.3만 개로 지도 학습. 2단계 RM: 답 K개의 순위를 K(K−1)/2개의 쌍 비교로 풀어, 이긴 답의 점수가 높도록 −log σ(r<sub>w</sub> − r<sub>l</sub>)로 학습. 3단계 PPO: 보상 모델을 채점자로 정책을 강화학습.</li>
+  <li>보상 모델은 차이만 배우므로 원점은 따로 맞추고, 정확도의 상한은 라벨러끼리의 일치 정도(약 73%)가 정한다.</li>
+  <li>보상 모델은 사람의 근사라서 SFT 분포 밖에서는 믿을 수 없다. <strong>KL 벌점</strong>(β)이 정책을 SFT 근처에 묶고, 최적 정책은 π<sub>SFT</sub> · exp(r/β) 꼴이다. <strong>사전학습 기울기</strong>(γ)는 공개 벤치마크 성능 하락을 막는다.</li>
+  <li>1750억 InstructGPT는 GPT-3보다 85%, few-shot GPT-3보다 71% 선호되었고, 13억 InstructGPT도 1750억 GPT-3보다 선호되었다. 드는 계산은 사전학습의 2% 미만이다.</li>
+  <li>"사람의 선호"는 라벨러 약 40명, 연구자의 지침, API 고객의 프롬프트가 겹친 것이다. 모델은 그 기준만큼만 정렬된다.</li>
+  <li>ChatGPT는 같은 세 단계를 대화 데이터에 적용한 것이다.</li>
+</ul>
+
+<!-- ───────── 12 ───────── -->
+<h2 id="s12">12. 확인 퀴즈</h2>
+<div id="quiz"></div>
+<p class="quiz-score" id="quizScore"></p>
+
+<footer>
+<p><strong>참고 문헌</strong></p>
+<ul class="refs">
+<li>Ouyang, Wu, Jiang, Almeida, Wainwright, Mishkin, Zhang, Agarwal, Slama, Ray, Schulman, Hilton, Kelton, Miller, Simens, Askell, Welinder, Christiano, Leike &amp; Lowe (2022), <em>Training Language Models to Follow Instructions with Human Feedback</em>, NeurIPS 2022 — <a href="https://arxiv.org/abs/2203.02155" target="_blank" rel="noopener">arXiv:2203.02155</a> (3.2절 데이터, 3.4절 라벨러, 3.5절 모델과 식 1·2, 4절 결과, 5절 논의, 부록 A.3 표 6, 부록 C 하이퍼파라미터)</li>
+<li>OpenAI (2022. 1. 27), <em>Aligning Language Models to Follow Instructions</em> — <a href="https://openai.com/index/instruction-following/" target="_blank" rel="noopener">openai.com</a> (달 착륙 예시)</li>
+<li>OpenAI (2022. 11. 30), <em>Introducing ChatGPT</em> — <a href="https://openai.com/index/chatgpt/" target="_blank" rel="noopener">openai.com</a> (Methods 절)</li>
+<li>Christiano, Leike, Brown, Martic, Legg &amp; Amodei (2017), <em>Deep Reinforcement Learning from Human Preferences</em> — <a href="https://arxiv.org/abs/1706.03741" target="_blank" rel="noopener">arXiv:1706.03741</a></li>
+<li>Stiennon et al. (2020), <em>Learning to Summarize from Human Feedback</em> — <a href="https://arxiv.org/abs/2009.01325" target="_blank" rel="noopener">arXiv:2009.01325</a></li>
+<li>Schulman, Wolski, Dhariwal, Radford &amp; Klimov (2017), <em>Proximal Policy Optimization Algorithms</em> — <a href="https://arxiv.org/abs/1707.06347" target="_blank" rel="noopener">arXiv:1707.06347</a></li>
+<li>DeepSeek-AI (2025), <em>DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning</em> — <a href="https://arxiv.org/abs/2501.12948" target="_blank" rel="noopener">arXiv:2501.12948</a></li>
+</ul>
+<p style="margin-top:18px"><a href="https://github.com/dev-jonghoonpark/how-ai-works">how-ai-works</a> 시리즈 · 모든 계산은 브라우저에서 실시간으로 이루어집니다.</p>
+</footer>
+</div>
+<script>
+var $=function(s){return document.querySelector(s);};
+var cssCache={};
+function css(v){return v in cssCache?cssCache[v]:(cssCache[v]=getComputedStyle(document.documentElement).getPropertyValue(v).trim());}
+function setup(cv){
+  if(!cv.dataset.h)cv.dataset.h=cv.getAttribute('height');
+  var dpr=Math.min(2,window.devicePixelRatio||1), w=cv.clientWidth, h=+cv.dataset.h;
+  var bw=Math.round(w*dpr), bh=Math.round(h*dpr);
+  if(cv.width!==bw||cv.height!==bh){cv.width=bw;cv.height=bh;cv.style.height=h+'px';}
+  var c=cv.getContext('2d'); c.setTransform(dpr,0,0,dpr,0,0);
+  c.clearRect(0,0,w,h);
+  return {c:c,w:w,h:h};
+}
+function fmt(x,d){var s=(+x).toFixed(d==null?2:d);return (+s===0?s.replace('-',''):s).replace('-','−');}
+function font(c,sz,w){c.font=(w||'')+' '+sz+'px system-ui,-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif';}
+function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function sig(x){return 1/(1+Math.exp(-x));}
+function pct(x){return fmt(x*100,1)+'%';}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+
+/* ══════ 데모 1: 순위 → 쌍 비교 ══════ */
+var D1R=[
+ ['A','사람들이 커다란 로켓을 타고 달에 갔어요. 달 위를 걸어 다니며 사진을 찍고, 돌을 주워서 지구로 돌아왔답니다.'],
+ ['B','중력 이론을 6살 아이에게 설명해 줘. 상대성 이론을 6살 아이에게 몇 문장으로 설명해 줘. 빅뱅 이론을 6살 아이에게 설명해 줘.'],
+ ['C','1969년 7월 20일 아폴로 11호의 달 착륙선 이글이 고요의 바다에 착륙했다. 새턴 V 발사체와 달 궤도 랑데부 방식이 쓰였으며, 선외 활동은 약 2시간 31분간 이루어졌다.'],
+ ['D','달 착륙은 여러 관점에서 볼 수 있는 주제라서 한마디로 설명하기는 어렵습니다. 상황과 맥락에 따라 다르게 이해될 수 있어요.'],
+ ['E','달은 치즈로 되어 있어서, 우주 비행사들이 배가 고파서 한 조각 떼어 오려고 갔어요.']
+],d1order=[];
+function d1draw(){
+  $('#d1list').innerHTML=D1R.map(function(r,i){var k=d1order.indexOf(i);
+    return '<label class="opt" data-i="'+i+'" style="display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:1px solid '+(k>=0?'var(--s1)':'var(--border)')+';border-radius:8px;margin:6px 0;cursor:pointer;font-size:14px;background:'+(k>=0?'var(--wash)':'transparent')+'"><span class="chip'+(k>=0?' tok':'')+'" style="flex:none;min-width:44px;text-align:center">'+(k>=0?(k+1)+'위':r[0])+'</span><span><b>'+r[0]+'</b> · '+esc(r[1])+'</span></label>';}).join('');
+  $('#d1list').querySelectorAll('.opt').forEach(function(el){el.addEventListener('click',function(){
+    var i=+el.dataset.i;if(d1order.indexOf(i)<0){d1order.push(i);if(d1order.length===D1R.length-1){for(var j=0;j<D1R.length;j++)if(d1order.indexOf(j)<0)d1order.push(j);}d1draw();}});});
+  var o=$('#d1out');
+  if(d1order.length<D1R.length){o.innerHTML=d1order.length?'지금까지: '+d1order.map(function(i){return '<b>'+D1R[i][0]+'</b>';}).join(' &gt; ')+' … (남은 답을 계속 고르세요)':'아직 고르지 않았습니다.';return;}
+  var pairs=[];for(var a=0;a<d1order.length;a++)for(var b=a+1;b<d1order.length;b++)pairs.push('<span class="chip">'+D1R[d1order[a]][0]+' ≻ '+D1R[d1order[b]][0]+'</span>');
+  o.innerHTML='순위 <b>'+d1order.map(function(i){return D1R[i][0];}).join(' &gt; ')+'</b> 하나에서 쌍 비교 <b>'+pairs.length+'개</b>가 나옵니다. 이 '+pairs.length+'개가 보상 모델 학습의 배치 원소 하나입니다.<div class="chips">'+pairs.join('')+'</div>보상 모델은 왼쪽 답의 점수가 오른쪽 답의 점수보다 높아지도록 학습합니다. 다른 사람은 C와 A, D와 E의 순서를 다르게 매길 수 있습니다. 그 불일치가 데모 3의 "라벨러 잡음"입니다.';
+}
+$('#d1reset').addEventListener('click',function(){d1order=[];d1draw();});
+d1draw();
+
+/* ══════ 데모 2: 쌍 손실 ══════ */
+function d2draw(){
+  var d=+$('#d2d').value/10;$('#d2dV').textContent=fmt(d,1);
+  var p=sig(d),l=-Math.log(p);$('#d2p').textContent=pct(p);$('#d2l').textContent=fmt(l,3);$('#d2g').textContent=fmt(1-p,3);
+  var g=setup($('#cv2')),c=g.c,L=40,R=g.w-12,T=12,B=g.h-32,YM=5.2;
+  function X(v){return L+(R-L)*(v+5)/10;}function Y(v){return B-(B-T)*v/YM;}
+  font(c,11,'500');c.textBaseline='middle';
+  for(var v=0;v<=5;v++){c.strokeStyle=css('--grid');c.lineWidth=1;c.beginPath();c.moveTo(L,Y(v)+.5);c.lineTo(R,Y(v)+.5);c.stroke();
+    c.fillStyle=css('--muted');c.textAlign='right';c.fillText(v,L-6,Y(v));}
+  c.textAlign='center';for(v=-4;v<=4;v+=2)c.fillText((v<0?'−':'')+Math.abs(v),X(v),B+12);
+  c.fillText('Δ = r(이긴 답) − r(진 답)',(L+R)/2,B+26);
+  c.strokeStyle=css('--axis');c.setLineDash([4,4]);c.beginPath();c.moveTo(X(0)+.5,T);c.lineTo(X(0)+.5,B);c.stroke();c.setLineDash([]);
+  c.fillStyle=css('--muted');c.textAlign='left';c.fillText('← 순서를 틀림',L+6,T+8);c.textAlign='right';c.fillText('순서를 맞힘 →',R-6,T+8);
+  c.strokeStyle=css('--s2');c.lineWidth=2.4;c.beginPath();
+  for(var i=0;i<=200;i++){var x=-5+i/20,y=-Math.log(sig(x));if(i)c.lineTo(X(x),Y(y));else c.moveTo(X(x),Y(y));}c.stroke();
+  c.strokeStyle=css('--text-secondary');c.lineWidth=1;c.beginPath();c.moveTo(X(d),Y(l));c.lineTo(X(d),B);c.stroke();
+  c.fillStyle=css('--s2');c.beginPath();c.arc(X(d),Y(l),5.5,0,7);c.fill();
+}
+$('#d2d').addEventListener('input',d2draw);
+
+/* ══════ 데모 3: 보상 모델 학습 ══════ */
+var FN=['지시를 수행함','사실에 맞음','간결함','독성','과한 얼버무림'],WS=[2.0,1.5,0.5,-2.5,-0.8],NF=5;
+var D3={th:[0,0,0,0,0],step:0,n:0,hist:[],run:false,r:mulberry(2022),val:null,ceil:0,agr:0};
+function dot(a,b){var s=0;for(var i=0;i<NF;i++)s+=a[i]*b[i];return s;}
+function rfeat(r){var f=[];for(var i=0;i<NF;i++)f.push(r());return f;}
+function gumbel(r){return -Math.log(-Math.log(Math.max(1e-12,r())));}
+function d3tau(){return +$('#d3t').value/100;}
+function d3mkval(){ /* 고정된 검증 쌍: 라벨은 잡음 섞인 라벨러 한 명의 선택 */
+  var r=mulberry(777),tau=d3tau(),v=[],ce=0,ag=0,N=3000;
+  for(var i=0;i<N;i++){var a=rfeat(r),b=rfeat(r),p=sig((dot(WS,a)-dot(WS,b))/tau),aw=r()<p;
+    v.push(aw?[a,b]:[b,a]);ce+=Math.max(p,1-p);ag+=p*p+(1-p)*(1-p);}
+  D3.val=v;D3.ceil=ce/N;D3.agr=ag/N;
+}
+function d3acc(){var ok=0;D3.val.forEach(function(pr){var d=dot(D3.th,pr[0])-dot(D3.th,pr[1]);ok+=d>0?1:d===0?0.5:0;});return ok/D3.val.length;}
+function d3stepOnce(){
+  var K=+$('#d3k').value,tau=d3tau(),r=D3.r,g=[0,0,0,0,0],P=1,np=K*(K-1)/2;
+  for(var q=0;q<P;q++){
+    var it=[];for(var i=0;i<K;i++){var f=rfeat(r);it.push({f:f,u:dot(WS,f)+tau*gumbel(r),s:dot(D3.th,f)});}
+    it.sort(function(a,b){return b.u-a.u;});
+    for(var a=0;a<K;a++)for(var b=a+1;b<K;b++){var w=(1-sig(it[a].s-it[b].s))/(np*P);
+      for(var j=0;j<NF;j++)g[j]+=w*(it[a].f[j]-it[b].f[j]);}
+  }
+  for(var j2=0;j2<NF;j2++)D3.th[j2]+=0.1*g[j2];
+  D3.step++;D3.n+=P*np;
+}
+function d3draw(){
+  $('#d3tV').textContent=fmt(d3tau(),2);$('#d3kV').textContent=$('#d3k').value;
+  var acc=d3acc(),nt=Math.sqrt(dot(D3.th,D3.th)),nw=Math.sqrt(dot(WS,WS)),cs=nt>0?dot(D3.th,WS)/(nt*nw):0;
+  $('#d3step').textContent=D3.step;$('#d3n').textContent=D3.n.toLocaleString();$('#d3acc').textContent=pct(acc);
+  $('#d3agr').textContent=pct(D3.agr);$('#d3cos').textContent=nt>0?fmt(cs,3):'—';
+  var h='';for(var i=0;i<NF;i++){var v=nt>0?D3.th[i]/nt:0,t=WS[i]/nw,col=v>=0?'var(--s3)':'var(--s8)';
+    h+='<span>'+FN[i]+'</span><span class="bar"><i style="background:'+col+';left:'+(v>=0?50:50+v*50)+'%;width:'+Math.abs(v)*50+'%"></i><i style="left:calc('+(50+t*50)+'% - 1.5px);width:3px;top:-4px;bottom:-4px;background:var(--text-primary)"></i></span><b>'+fmt(v,2)+'</b>';}
+  $('#d3bars').innerHTML=h;
+  var g=setup($('#cv3')),c=g.c,L=40,R=g.w-10,T=10,B=g.h-30,XM=Math.max(300,D3.step);
+  function X(s){return L+(R-L)*s/XM;}function Y(v){return B-(B-T)*(v-0.4)/0.6;}
+  font(c,11,'500');c.textBaseline='middle';
+  for(var v2=0.4;v2<=1.001;v2+=0.1){c.strokeStyle=css('--grid');c.lineWidth=1;c.beginPath();c.moveTo(L,Y(v2)+.5);c.lineTo(R,Y(v2)+.5);c.stroke();
+    c.fillStyle=css('--muted');c.textAlign='right';c.fillText(Math.round(v2*100)+'%',L-6,Y(v2));}
+  c.textAlign='center';c.fillStyle=css('--muted');[0,XM/2,XM].forEach(function(s){c.fillText(Math.round(s),X(s),B+12);});c.fillText('스텝',(L+R)/2,B+24);
+  function hl(v,col){c.setLineDash([5,4]);c.strokeStyle=col;c.lineWidth=1.5;c.beginPath();c.moveTo(L,Y(v));c.lineTo(R,Y(v));c.stroke();c.setLineDash([]);}
+  hl(D3.ceil,css('--muted'));hl(D3.agr,css('--s1'));
+  if(D3.hist.length){c.strokeStyle=css('--s2');c.lineWidth=2.2;c.beginPath();
+    D3.hist.forEach(function(p,i){if(i)c.lineTo(X(p[0]),Y(p[1]));else c.moveTo(X(p[0]),Y(p[1]));});c.stroke();}
+}
+function d3reset(){D3.th=[0,0,0,0,0];D3.step=0;D3.n=0;D3.r=mulberry(2022);d3mkval();D3.hist=[[0,d3acc()]];d3stop();d3draw();}
+function d3stop(){D3.run=false;$('#d3run').textContent='▶ 학습';}
+function d3loop(){if(!D3.run)return;for(var i=0;i<2;i++)d3stepOnce();D3.hist.push([D3.step,d3acc()]);d3draw();
+  if(D3.step>=600){d3stop();return;}requestAnimationFrame(d3loop);}
+$('#d3run').addEventListener('click',function(){if(D3.run){d3stop();return;}if(D3.step>=600)d3reset();D3.run=true;$('#d3run').textContent='⏸ 멈춤';d3loop();});
+$('#d3reset').addEventListener('click',d3reset);
+$('#d3t').addEventListener('input',d3reset);$('#d3k').addEventListener('input',d3reset);
+
+/* ══════ 데모 4: PPO 클립 ══════ */
+var d4A=1;
+function d4draw(){
+  var rho=+$('#d4r').value/100,e=+$('#d4e').value/100;$('#d4rV').textContent=fmt(rho,2);$('#d4eV').textContent=fmt(e,2);
+  function Lc(r){var cl=Math.min(1+e,Math.max(1-e,r));return Math.min(r*d4A,cl*d4A);}
+  var g=setup($('#cv4')),c=g.c,L=40,R=g.w-12,T=12,B=g.h-32,lo=d4A>0?0:-2.1,hi=d4A>0?2.1:0;
+  function X(v){return L+(R-L)*v/2;}function Y(v){return B-(B-T)*(v-lo)/(hi-lo);}
+  font(c,11,'500');c.textBaseline='middle';
+  for(var v=Math.ceil(lo*2)/2;v<=hi+1e-9;v+=0.5){c.strokeStyle=css('--grid');c.lineWidth=1;c.beginPath();c.moveTo(L,Y(v)+.5);c.lineTo(R,Y(v)+.5);c.stroke();
+    c.fillStyle=css('--muted');c.textAlign='right';c.fillText(fmt(v,1),L-6,Y(v));}
+  c.textAlign='center';[0,0.5,1,1.5,2].forEach(function(x){c.fillStyle=css('--muted');c.fillText(fmt(x,1),X(x),B+12);});
+  c.fillText('확률 비 ρ = π_new / π_old',(L+R)/2,B+26);
+  c.fillStyle=css('--wash');c.fillRect(X(1-e),T,X(1+e)-X(1-e),B-T);
+  c.strokeStyle=css('--axis');c.lineWidth=1.5;c.setLineDash([4,4]);c.beginPath();c.moveTo(X(0),Y(0));c.lineTo(X(2),Y(2*d4A));c.stroke();c.setLineDash([]);
+  c.strokeStyle=css('--s3');c.lineWidth=2.6;c.beginPath();
+  for(var i=0;i<=200;i++){var x=i/100;if(i)c.lineTo(X(x),Y(Lc(x)));else c.moveTo(X(x),Y(Lc(x)));}c.stroke();
+  c.fillStyle=css('--s3');c.beginPath();c.arc(X(rho),Y(Lc(rho)),5.5,0,7);c.fill();
+  var flat=d4A>0?rho>1+e:rho<1-e,msg;
+  if(d4A>0)msg=flat?'좋은 답의 확률을 이미 <b>'+fmt(1+e,2)+'배 넘게</b> 올렸습니다. 목적 함수가 평평해서 이 표본은 더 밀지 않습니다.':rho<1?'좋은 답인데 확률이 <b>줄었습니다</b>. 자르지 않으므로 확률을 다시 올리는 기울기가 그대로 작용합니다.':'좋은 답의 확률을 올리는 중입니다. (1 + ε) = '+fmt(1+e,2)+'배까지 기울기가 있습니다.';
+  else msg=flat?'나쁜 답의 확률을 이미 <b>'+fmt(1-e,2)+'배 아래로</b> 낮췄습니다. 목적 함수가 평평해서 더 낮추지 않습니다.':rho>1?'나쁜 답인데 확률이 <b>늘었습니다</b>. 자르지 않으므로 확률을 다시 낮추는 기울기가 그대로 작용합니다.':'나쁜 답의 확률을 낮추는 중입니다. (1 − ε) = '+fmt(1-e,2)+'배까지 기울기가 있습니다.';
+  $('#d4info').innerHTML='목적 함수 기여 = <b>'+fmt(Lc(rho),2)+'</b> (자르지 않았다면 '+fmt(rho*d4A,2)+') · '+msg;
+}
+$('#d4r').addEventListener('input',d4draw);$('#d4e').addEventListener('input',d4draw);
+function d4set(a){d4A=a;$('#d4pos').setAttribute('aria-pressed',a>0);$('#d4neg').setAttribute('aria-pressed',a<0);d4draw();}
+$('#d4pos').addEventListener('click',function(){d4set(1);});$('#d4neg').addEventListener('click',function(){d4set(-1);});
+
+/* ══════ 데모 5: KL 벌점과 과최적화 ══════ */
+var TY=[
+ ['지시를 무시하고 문장을 이어 씀',-2.0,-2.0,0.10],
+ ['짧고 정확한 답',2.0,1.8,0.35],
+ ['정확하지만 장황한 답',1.0,1.1,0.25],
+ ['얼버무리는 답',0.0,0.2,0.20],
+ ['자신 있게 지어낸 답 (환각)',-1.5,-1.0,0.09],
+ ['그럴듯한 말투로 길게 늘인 빈 답',-1.0,2.6,0.01]
+],d5err=true;
+function d5pol(beta){var w=TY.map(function(t){return Math.log(t[3])+(d5err?t[2]:t[1])/beta;}),m=Math.max.apply(null,w),z=0;
+  w=w.map(function(x){var e=Math.exp(x-m);z+=e;return e;});return w.map(function(x){return x/z;});}
+function d5stat(p){var rm=0,hu=0,kl=0;TY.forEach(function(t,i){rm+=p[i]*(d5err?t[2]:t[1]);hu+=p[i]*t[1];if(p[i]>0)kl+=p[i]*Math.log(p[i]/t[3]);});return {rm:rm,hu:hu,kl:kl};}
+function d5draw(){
+  var bv=+$('#d5b').value/100,beta=Math.pow(10,bv);$('#d5bV').textContent=fmt(beta,2);
+  var p=d5pol(beta),s=d5stat(p);
+  $('#d5rm').textContent=fmt(s.rm,2);$('#d5hu').textContent=fmt(s.hu,2);$('#d5kl').textContent=fmt(s.kl,2);$('#d5ex').textContent=pct(p[5]);
+  var h='<tr><th>응답 유형과 π_RL (막대)</th><th class="num">π_SFT</th><th class="num">사람</th><th class="num">보상 모델</th></tr>';
+  TY.forEach(function(t,i){var rmv=d5err?t[2]:t[1],off=Math.abs(rmv-t[1])>0.5;
+    h+='<tr><td style="min-width:150px">'+t[0]+'<div style="white-space:nowrap;margin-top:2px"><span style="display:inline-block;vertical-align:middle;height:10px;border-radius:3px;background:'+(i===5?'var(--s8)':'var(--s3)')+';width:'+Math.max(1,p[i]*100)+'px"></span> <b style="font-variant-numeric:tabular-nums;font-size:13px">'+pct(p[i])+'</b></div></td><td class="num">'+pct(t[3])+'</td><td class="num">'+fmt(t[1],1)+'</td><td class="num"'+(off?' style="color:var(--s8);font-weight:700"':'')+'>'+fmt(rmv,1)+'</td></tr>';});
+  $('#d5tb').innerHTML=h;
+  var g=setup($('#cv5')),c=g.c,L=40,R=g.w-12,T=12,B=g.h-34,lo=-1.5,hi=3;
+  function X(v){return L+(R-L)*(v+1.3)/2.3;}function Y(v){return B-(B-T)*(v-lo)/(hi-lo);}
+  font(c,11,'500');c.textBaseline='middle';
+  for(var v=-1;v<=3;v++){c.strokeStyle=css('--grid');c.lineWidth=1;c.beginPath();c.moveTo(L,Y(v)+.5);c.lineTo(R,Y(v)+.5);c.stroke();
+    c.fillStyle=css('--muted');c.textAlign='right';c.fillText(fmt(v,0),L-6,Y(v));}
+  c.textAlign='center';[0.05,0.1,0.3,1,3,10].forEach(function(b){c.fillStyle=css('--muted');c.fillText(b,X(Math.log10(b)),B+12);});
+  c.fillText('KL 계수 β (로그 스케일) — 왼쪽일수록 보상 모델을 더 믿음',(L+R)/2,B+27);
+  var sft=d5stat(TY.map(function(t){return t[3];})).hu;
+  c.setLineDash([4,4]);c.strokeStyle=css('--axis');c.lineWidth=1.5;c.beginPath();c.moveTo(L,Y(sft));c.lineTo(R,Y(sft));c.stroke();c.setLineDash([]);
+  function line(key,col){c.strokeStyle=col;c.lineWidth=2.4;c.beginPath();
+    for(var i=0;i<=115;i++){var x=-1.3+i*0.02,y=d5stat(d5pol(Math.pow(10,x)))[key];if(i)c.lineTo(X(x),Y(y));else c.moveTo(X(x),Y(y));}c.stroke();}
+  line('rm',css('--s2'));line('hu',css('--s3'));
+  c.strokeStyle=css('--text-secondary');c.lineWidth=1;c.beginPath();c.moveTo(X(bv),T);c.lineTo(X(bv),B);c.stroke();
+  c.fillStyle=css('--s2');c.beginPath();c.arc(X(bv),Y(s.rm),5,0,7);c.fill();
+  c.fillStyle=css('--s3');c.beginPath();c.arc(X(bv),Y(s.hu),5,0,7);c.fill();
+}
+$('#d5b').addEventListener('input',d5draw);
+function d5set(e){d5err=e;$('#d5err').setAttribute('aria-pressed',e);$('#d5ok').setAttribute('aria-pressed',!e);d5draw();}
+$('#d5err').addEventListener('click',function(){d5set(true);});$('#d5ok').addEventListener('click',function(){d5set(false);});
+
+/* ══════ 계산 비용 막대 ══════ */
+var CO=[['SFT (1750억)',4.9,'--s1'],['PPO-ptx (1750억)',60,'--s3'],['GPT-3 사전학습',3640,'--muted']];
+function d6draw(){var g=setup($('#cv6')),c=g.c,L=Math.min(150,g.w*0.36),R=g.w-64,T=6,rh=(g.h-28)/CO.length;
+  function X(v){return L+(R-L)*Math.log10(v)/4;}
+  font(c,10.5,'500');c.textBaseline='middle';
+  [1,10,100,1000,10000].forEach(function(v){c.strokeStyle=css('--grid');c.lineWidth=1;c.beginPath();c.moveTo(X(v)+.5,T);c.lineTo(X(v)+.5,g.h-22);c.stroke();
+    c.fillStyle=css('--muted');c.textAlign='center';c.fillText(v.toLocaleString(),X(v),g.h-11);});
+  CO.forEach(function(d,i){var y=T+rh*i+rh/2;c.fillStyle=css(d[2]);c.fillRect(X(1),y-rh*0.3,X(d[1])-X(1),rh*0.6);
+    font(c,12,'600');c.fillStyle=css('--text-primary');c.textAlign='right';c.fillText(d[0],L-8,y);
+    font(c,11.5,'600');c.textAlign='left';c.fillText(d[1].toLocaleString(),X(d[1])+6,y);});
+}
+
+/* ══════ 퀴즈 ══════ */
+var QZ=[
+ {q:'논문이 말하는 GPT-3의 근본 문제는?',o:['파라미터 수가 부족하다','다음 토큰 예측이라는 목적 함수가 "지시를 도움이 되고 안전하게 따르기"와 다르다','학습 데이터가 너무 오래되었다','문맥 길이가 짧다'],a:1,e:'논문은 이를 목적 함수가 어긋나 있다(misaligned)고 부릅니다. InstructGPT는 프롬프트가 아니라 목적 함수 쪽을 옮깁니다.'},
+ {q:'RLHF 세 단계에서 사람이 직접 라벨을 만드는 단계는?',o:['1단계(시연)와 2단계(순위)','2단계(순위)와 3단계(PPO)','3단계(PPO)만','세 단계 모두'],a:0,e:'3단계에서는 보상 모델이 사람을 대신해 채점합니다. PPO 데이터셋은 프롬프트만 있고 사람 라벨이 없습니다.'},
+ {q:'라벨러가 답 9개의 순위를 매기면 쌍 비교는 몇 개인가?',o:['9개','18개','36개','81개'],a:2,e:'C(9,2) = 9 × 8 / 2 = 36. 논문은 한 프롬프트의 쌍 전체를 배치 원소 하나로 묶어 학습합니다.'},
+ {q:'한 순위에서 나온 쌍들을 섞지 않고 배치 원소 하나로 묶은 이유는?',o:['GPU 메모리가 부족해서','쌍들이 같은 답을 공유해 강하게 얽혀 있어, 섞으면 한 에폭 만에 과적합해서','라벨러의 익명성을 지키려고','순위에 동점이 많아서'],a:1,e:'섞으면 답 하나가 한 에폭에 최대 K−1번 나옵니다. 묶으면 답마다 순전파를 한 번만 하면 되어 계산도 줄어듭니다.'},
+ {q:'보상 모델의 손실 −log σ(r_w − r_l)에서 알 수 있는 것은?',o:['점수의 절대값이 의미를 갖는다','점수의 차이만 의미를 가지므로 원점은 따로 정해야 한다','점수는 항상 0과 1 사이다','진 답의 점수는 학습되지 않는다'],a:1,e:'모든 점수에 상수를 더해도 손실이 같습니다. 그래서 논문은 라벨러 시연의 평균 점수가 0이 되도록 편향을 맞춥니다.'},
+ {q:'PPO 단계에서 SFT 모델과의 KL 벌점을 넣은 이유는?',o:['학습 속도를 높이려고','보상 모델의 과최적화를 줄이려고 — 보상 모델은 SFT 분포 근처에서만 믿을 수 있으므로','답을 길게 만들려고','가치 함수를 초기화하려고'],a:1,e:'"to mitigate over-optimization of the reward model". 데모 5에서 β를 너무 낮추면 보상 모델 점수는 오르는데 사람 기준 점수는 떨어집니다.'},
+ {q:'PPO-ptx가 PPO에 더한 것은?',o:['더 큰 보상 모델','사전학습 데이터의 로그 가능도 기울기를 섞기','few-shot 접두','사람의 실시간 피드백'],a:1,e:'PPO만 하면 공개 NLP 벤치마크 성능이 떨어졌고, 사전학습 기울기를 섞어 이를 막았습니다(γ = 27.8).'},
+ {q:'InstructGPT가 해로운 지시도 대체로 따르는 이유로 논문이 든 것은?',o:['PPO 알고리즘의 결함','학습 데이터를 모을 때 라벨러가 사용자에게 도움이 되는 것을 우선하도록 했기 때문','보상 모델이 60억 크기라서','KL 계수가 너무 커서'],a:1,e:'무엇을 거절할지는 기법이 아니라 라벨링 지침이 정합니다. 최종 평가에서는 사실성과 무해함을 우선하게 했습니다.'}
+];
+(function(){var box=$('#quiz'),score=0,done=0;
+  QZ.forEach(function(it,i){var d=document.createElement('div');d.className='q';
+    d.innerHTML='<h4>Q'+(i+1)+'. '+it.q+'</h4>'+it.o.map(function(o,j){return '<label class="opt"><input type="radio" name="q'+i+'" value="'+j+'"><span>'+o+'</span></label>';}).join('')+'<div class="expl"></div>';
+    box.appendChild(d);
+    d.querySelectorAll('input').forEach(function(inp){inp.addEventListener('change',function(){
+      if(d.dataset.done)return;d.dataset.done=1;done++;
+      var j=+inp.value,ok=j===it.a;if(ok)score++;
+      d.querySelectorAll('.opt').forEach(function(l,x){if(x===it.a)l.classList.add('correct');else if(x===j)l.classList.add('wrong');});
+      var ex=d.querySelector('.expl');ex.textContent=(ok?'정답! ':'오답. ')+it.e;ex.classList.add('show');if(!ok)ex.classList.add('bad');
+      $('#quizScore').textContent=done+'문제 중 '+score+'개 정답'+(done===QZ.length?' — 끝!':'');
+    });});
+  });
+})();
+
+/* ══════ 테마·초기화 ══════ */
+function drawAll(){d2draw();d3draw();d4draw();d5draw();d6draw();}
+var tbtn=$('#themeBtn');
+if(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)document.documentElement.setAttribute('data-theme','dark');
+function syncBtn(){tbtn.textContent=document.documentElement.getAttribute('data-theme')==='dark'?'◑ 라이트':'◐ 다크';}
+tbtn.addEventListener('click',function(){var d=document.documentElement.getAttribute('data-theme')==='dark';
+  document.documentElement.setAttribute('data-theme',d?'light':'dark');cssCache={};syncBtn();drawAll();});
+syncBtn();cssCache={};d3mkval();D3.hist=[[0,d3acc()]];drawAll();
+var rz,lastW=document.documentElement.clientWidth;
+window.addEventListener('resize',function(){clearTimeout(rz);rz=setTimeout(function(){
+  var w=document.documentElement.clientWidth;if(w===lastW)return;lastW=w;drawAll();},120);});
+</script>
+</body>
+</html>
